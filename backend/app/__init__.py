@@ -1,0 +1,1 @@
+"""SentimentIQ backend application package."""
