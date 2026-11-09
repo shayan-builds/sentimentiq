@@ -48,7 +48,10 @@ Install the training dependencies with `python -m pip install -e ".[training]"` 
 
 ```powershell
 python -m sentimentiq_ml.prepare_amazon .\data\reviews.jsonl.gz .\data\reviews.csv
+python -m sentimentiq_ml.train_model .\data\reviews.csv --preflight-only --test-size 0.2
 python -m sentimentiq_ml.train_model .\data\reviews.csv .\artifacts\product-model.joblib .\artifacts\evaluation.json
 ```
+
+The preflight command does not fit a model. It reports row and distinct product-group counts for each sentiment label in both the 80% training partition and 20% holdout. It checks for at least 100 distinct product groups per label in the holdout and exits with code 2 if any label is below that minimum. Training enforces the same check. The trainer and preflight use the same deterministic split procedure. If sampling, sample across product groups rather than taking the first N records.
 
 Set `SENTIMENTIQ_MODEL_PATH` to the resulting artifact before starting a worker. The trained TF-IDF/logistic-regression model is used for the `product` domain; `campus` stays on VADER. The command creates a product-group holdout report. Its `predict_proba` outputs remain `raw_score` values and are not calibrated probabilities. Do not load joblib artifacts from untrusted sources. Keep datasets, model artifacts, and reports out of Git.
