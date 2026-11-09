@@ -38,7 +38,7 @@ The baseline identifies aspects only from a maintained domain vocabulary, so uns
 
 ## Dataset preparation
 
-The `prepare_amazon` module converts a downloaded Amazon Reviews JSONL/JSONL.GZ file into text, label, and product-group columns while omitting user IDs. Labels map 1-2 stars to negative, 2.5-3.5 to neutral, and 4-5 to positive. This mapping is weak supervision; do not treat it as human sentiment annotation. A `--limit` export is only an early-record development sample and may be biased. Keep source data and generated files under ignored `ml/data/` and do not commit them.
+The `prepare_amazon` module converts a downloaded Amazon Reviews JSONL/JSONL.GZ file into text, label, and product-group columns while omitting user IDs. Labels map 1-2 stars to negative, 2.5-3.5 to neutral, and 4-5 to positive. This mapping is weak supervision; do not treat it as human sentiment annotation. The default preparation samples up to 5,000 distinct eligible product groups and up to 25,000 reviews. It uses a fixed seed (`42` by default), samples uniformly across distinct groups and samples reviews within selected groups, rather than taking the first records. Configure it with `--target-groups`, `--target-reviews`, and `--seed`; `--limit` remains an alias for `--target-reviews`. Its summary reports exported rows and distinct product groups for each sentiment label. Keep source data and generated files under ignored `ml/data/` and do not commit them.
 
 UCSD/McAuley Lab's Amazon Reviews 2023 data is one possible product-review source. Check its terms and intended use before using or redistributing it. The VADER library and source lexicon are MIT licensed.
 
@@ -47,7 +47,7 @@ UCSD/McAuley Lab's Amazon Reviews 2023 data is one possible product-review sourc
 Install the training dependencies with `python -m pip install -e ".[training]"` from `ml/`. Prepare a permitted Amazon sample, then run:
 
 ```powershell
-python -m sentimentiq_ml.prepare_amazon .\data\reviews.jsonl.gz .\data\reviews.csv
+python -m sentimentiq_ml.prepare_amazon .\data\reviews.jsonl.gz .\data\reviews.csv --target-groups 5000 --target-reviews 25000 --seed 42
 python -m sentimentiq_ml.train_model .\data\reviews.csv --preflight-only --test-size 0.2
 python -m sentimentiq_ml.train_model .\data\reviews.csv .\artifacts\product-model.joblib .\artifacts\evaluation.json
 ```
