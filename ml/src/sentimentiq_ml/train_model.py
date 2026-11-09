@@ -23,22 +23,44 @@ _LABELS = {"positive", "negative", "neutral"}
 
 
 def train(input_csv: Path, artifact_path: Path, report_path: Path, test_size: float = 0.2) -> dict[str, object]:
-    frame = pd.read_csv(input_csv, usecols=["text", "label", "group_id"])
+    if not 0.05 <= test_size <= 0.5:
+        raise ValueError("test_size must be between 0.05 and 0.5")
+    frame = pd.read_csv(input_csv)
+    required_columns = {"text", "label", "group_id"}
+    missing_columns = required_columns.difference(frame.columns)
+    if missing_columns:
+        raise ValueError(f"Training CSV is missing required columns: {', '.join(sorted(missing_columns))}")
+    frame = frame[["text", "label", "group_id"]]
     frame = frame.dropna(subset=["text", "label", "group_id"])
     frame["text"] = frame["text"].astype(str).str.strip()
     frame["label"] = frame["label"].astype(str).str.strip().str.lower()
-    frame["group_id"] = frame["group_id"].astype(str)
+    frame["group_id"] = frame["group_id"].astype(str).str.strip()
     frame = frame[frame["text"].ne("") & frame["label"].isin(_LABELS)]
+    frame = frame[frame["group_id"].ne("")]
+    if frame.empty:
+        raise ValueError("Training CSV has no valid labeled text rows with group IDs")
     if frame["label"].nunique() != 3:
         raise ValueError("Training CSV must contain positive, negative, and neutral labels")
     if frame["group_id"].nunique() < 2:
         raise ValueError("At least two distinct group_id values are required for a holdout split")
 
-    split = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
-    train_idx, test_idx = next(split.split(frame["text"], frame["label"], groups=frame["group_id"]))
-    train_frame, test_frame = frame.iloc[train_idx], frame.iloc[test_idx]
-    if train_frame["label"].nunique() != 3 or test_frame["label"].nunique() != 3:
-        raise ValueError("Group holdout must contain all three labels in both splits; add more data/groups")
+    # GroupShuffleSplit preserves product-level separation, but a single random
+    # split can omit a class when labels are unevenly distributed by product.
+    # Try a bounded, deterministic set of group splits before reporting that
+    # the input data cannot support a three-class evaluation.
+    split = GroupShuffleSplit(n_splits=32, test_size=test_size, random_state=42)
+    train_frame = test_frame = None
+    for train_idx, test_idx in split.split(frame["text"], frame["label"], groups=frame["group_id"]):
+        candidate_train = frame.iloc[train_idx]
+        candidate_test = frame.iloc[test_idx]
+        if candidate_train["label"].nunique() == 3 and candidate_test["label"].nunique() == 3:
+            train_frame, test_frame = candidate_train, candidate_test
+            break
+    if train_frame is None or test_frame is None:
+        raise ValueError(
+            "Could not create a group-separated holdout with all three labels in both splits "
+            "after 32 deterministic attempts; add more groups per label or adjust --test-size"
+        )
 
     pipeline = Pipeline([
         ("tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_features=200_000, sublinear_tf=True)),
@@ -65,7 +87,7 @@ def train(input_csv: Path, artifact_path: Path, report_path: Path, test_size: fl
     report_document = {
         "model_id": artifact["model_id"],
         "model_revision": revision,
-        "split": "GroupShuffleSplit(test_size=%.3f, random_state=42)" % test_size,
+        "split": "GroupShuffleSplit(test_size=%.3f, random_state=42, attempts<=32)" % test_size,
         "train_rows": int(len(train_frame)),
         "holdout_rows": int(len(test_frame)),
         "train_groups": int(train_frame["group_id"].nunique()),

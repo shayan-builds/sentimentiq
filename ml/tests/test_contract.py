@@ -44,6 +44,19 @@ def test_aspect_mentions_are_repeated_and_offsets_address_original_unicode_text(
     assert [item.sentiment_label for item in mentions] == ["positive", "negative"]
 
 
+def test_vader_baseline_keeps_default_negative_threshold_behavior():
+    text = "The battery is excellent but the delivery was terrible."
+    result = analyze(text, "product")
+    delivery = next(item for item in result.aspects if item.aspect_category == "delivery")
+
+    # VADER's default negative cutoff is -0.5. This example falls just above it;
+    # keep it visible as baseline behavior until labeled evaluation supports a change.
+    assert delivery.sentiment_label == "neutral"
+    assert -0.5 < delivery.sentiment_score < -0.45
+    assert result.overall.sentiment_label == "neutral"
+    assert -0.5 < result.overall.sentiment_score < -0.4
+
+
 def test_model_info_is_domain_aware():
     assert get_model_info("product").model_id == "sentimentiq-vader-baseline"
     assert get_model_info("campus").model_revision == "vaderSentiment-3.3.2"
@@ -56,7 +69,7 @@ def test_analytics_use_successful_rows_and_group_confidence_by_kind():
             sentiment_score=0.75,
             confidence_value=0.8,
             confidence_kind="raw_score",
-            aspects=(StoredAspect("battery", "battery", "positive", 0.75, 0.8, "raw_score"),),
+            aspects=(StoredAspect("battery", "battery", "positive", 0.75, 0.1, "raw_score", 5, 12),),
             created_at=datetime.now(timezone.utc),
             domain="product",
         ),
@@ -75,5 +88,6 @@ def test_analytics_use_successful_rows_and_group_confidence_by_kind():
     assert summary.total_results == 2
     assert summary.sentiment_percentages["positive"] == 50.0
     assert summary.confidence_by_kind["raw_score"].count == 1
+    assert summary.confidence_by_kind["raw_score"].average_value == 0.8
     assert summary.confidence_by_kind["calibrated_probability"].average_value == 0.9
     assert summary.total_aspect_mentions == 1

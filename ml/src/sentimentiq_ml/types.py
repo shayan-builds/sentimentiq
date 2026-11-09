@@ -117,6 +117,23 @@ class StoredAspect:
     sentiment_score: float
     confidence_value: float
     confidence_kind: ConfidenceKind
+    start_offset: int | None = None
+    end_offset: int | None = None
+
+    def __post_init__(self) -> None:
+        _validate_sentiment(
+            self.sentiment_label,
+            self.sentiment_score,
+            self.confidence_value,
+            self.confidence_kind,
+        )
+        if not self.aspect_text:
+            raise ValueError("aspect_text must not be empty")
+        if (self.start_offset is None) != (self.end_offset is None):
+            raise ValueError("start_offset and end_offset must both be set or both be null")
+        if self.start_offset is not None:
+            if self.start_offset < 0 or self.end_offset is None or self.end_offset <= self.start_offset:
+                raise ValueError("offsets must be nonnegative and end_offset must exceed start_offset")
 
 
 @dataclass(frozen=True, slots=True)
