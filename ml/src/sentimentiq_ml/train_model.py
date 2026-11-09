@@ -24,7 +24,8 @@ MIN_HOLDOUT_GROUPS_PER_LABEL = 100
 
 
 def _load_training_frame(input_csv: Path) -> pd.DataFrame:
-    frame = pd.read_csv(input_csv)
+    # Preserve legitimate review strings such as "N/A"; blanks are filtered below.
+    frame = pd.read_csv(input_csv, keep_default_na=False)
     required_columns = {"text", "label", "group_id"}
     missing_columns = required_columns.difference(frame.columns)
     if missing_columns:

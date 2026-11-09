@@ -61,3 +61,22 @@ def test_preflight_passes_when_each_holdout_label_has_100_groups(tmp_path):
     assert report["holdout_group_check"]["labels_below_minimum"] == []
     for label in ("positive", "negative", "neutral"):
         assert report["holdout_group_check"]["per_label"][label]["groups"] == 120
+
+
+def test_training_loader_preserves_literal_na_review_text(tmp_path):
+    pytest.importorskip("pandas")
+    pytest.importorskip("sklearn")
+    pytest.importorskip("joblib")
+    from sentimentiq_ml.train_model import _load_training_frame
+
+    dataset = tmp_path / "reviews.csv"
+    with dataset.open("w", newline="", encoding="utf-8") as output:
+        writer = csv.DictWriter(output, fieldnames=("text", "label", "group_id"))
+        writer.writeheader()
+        for text, label in (("N/A", "positive"), ("bad", "negative"), ("fine", "neutral")):
+            writer.writerow({"text": text, "label": label, "group_id": label})
+
+    frame = _load_training_frame(dataset)
+
+    assert len(frame) == 3
+    assert "N/A" in frame["text"].tolist()
