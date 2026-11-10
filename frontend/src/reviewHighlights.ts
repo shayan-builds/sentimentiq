@@ -7,13 +7,21 @@ export interface ReviewSegment {
 
 /**
  * Highlight only aspect offsets that point to their exact mention in the
- * submitted JavaScript string. Offsets are zero-based and end-exclusive.
- * Invalid, stale, and overlapping spans are omitted rather than guessed.
+ * submitted text. API offsets are zero-based Unicode code-point offsets,
+ * while JavaScript string slices use UTF-16 code units. Invalid, stale, and
+ * overlapping spans are omitted rather than guessed.
  */
 export function buildReviewSegments(
   text: string,
   aspects: readonly AspectResult[],
 ): ReviewSegment[] {
+  const codePointToCodeUnit = [0]
+  let codeUnitOffset = 0
+  for (const codePoint of text) {
+    codeUnitOffset += codePoint.length
+    codePointToCodeUnit.push(codeUnitOffset)
+  }
+
   const spans = aspects
     .flatMap((aspect) => {
       const { start_offset: start, end_offset: end } = aspect
@@ -26,13 +34,15 @@ export function buildReviewSegments(
         !Number.isInteger(end) ||
         start < 0 ||
         start >= end ||
-        end > text.length ||
+        end >= codePointToCodeUnit.length ||
         !aspect.aspect_text ||
-        text.slice(start, end).toLowerCase() !== aspect.aspect_text.toLowerCase()
+        text
+          .slice(codePointToCodeUnit[start], codePointToCodeUnit[end])
+          .toLowerCase() !== aspect.aspect_text.toLowerCase()
       ) {
         return []
       }
-      return [{ start, end }]
+      return [{ start: codePointToCodeUnit[start], end: codePointToCodeUnit[end] }]
     })
     .sort((left, right) => left.start - right.start || left.end - right.end)
 
