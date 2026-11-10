@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { Fragment, useState, type FormEvent } from 'react'
 import {
   analyzeBatch,
   analyzeReview,
@@ -9,11 +9,13 @@ import {
   type SentimentLabel,
   type SentimentValue,
 } from './api'
+import { buildReviewSegments } from './reviewHighlights'
 
 type Mode = 'single' | 'batch'
 
 const MAX_TEXT_LENGTH = 10_000
 const MAX_BATCH_SIZE = 100
+const BATCH_REVIEW_DETAILS_THRESHOLD = 240
 
 function BrandMark() {
   return (
@@ -36,6 +38,7 @@ function App() {
   const [submittedReviews, setSubmittedReviews] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [announcement, setAnnouncement] = useState('')
 
   const batchReviews = batchText
     .split(/\r?\n/)
@@ -47,6 +50,7 @@ function App() {
     setBatchResults(null)
     setSubmittedReviews([])
     setError(null)
+    setAnnouncement('')
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -64,11 +68,15 @@ function App() {
         return
       }
       setLoading(true)
+      setAnnouncement('Analyzing…')
       try {
-        setSingleResult(await analyzeReview({ text: review, domain }))
+        const result = await analyzeReview({ text: review, domain })
+        setSingleResult(result)
         setSubmittedReviews([review])
+        setAnnouncement('Analysis complete.')
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : 'Analysis could not be completed.')
+        setAnnouncement('')
       } finally {
         setLoading(false)
       }
@@ -90,11 +98,17 @@ function App() {
     }
 
     setLoading(true)
+    setAnnouncement('Analyzing…')
     try {
-      setBatchResults(await analyzeBatch({ texts: batchReviews, domain }))
+      const outcomes = await analyzeBatch({ texts: batchReviews, domain })
+      setBatchResults(outcomes)
       setSubmittedReviews(batchReviews)
+      const succeeded = outcomes.filter((outcome) => outcome.status === 'succeeded').length
+      const failed = outcomes.length - succeeded
+      setAnnouncement(`Batch complete: ${succeeded} succeeded, ${failed} failed.`)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Batch analysis could not be completed.')
+      setAnnouncement('')
     } finally {
       setLoading(false)
     }
@@ -104,6 +118,7 @@ function App() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main">Skip to main content</a>
       <aside className="sidebar">
         <a className="brand" href="#main" aria-label="SentimentIQ home">
           <BrandMark />
@@ -112,7 +127,7 @@ function App() {
 
         <div className="sidebar-label">WORKSPACE</div>
         <nav className="primary-nav" aria-label="Main navigation">
-          <a className="nav-item active" href="#analyzer" aria-current="page">
+          <a className="nav-item active" href="#analyzer" aria-current="page" aria-label="Text analyzer" title="Text analyzer">
             <NavGlyph />
             <span>Text analyzer</span>
             <span className="nav-indicator" />
@@ -122,17 +137,18 @@ function App() {
         <div className="sidebar-bottom">
           <div className="sidebar-note-icon"><SparkGlyph /></div>
           <p>Clear signals from every voice.</p>
-          <span>Live model inference</span>
+          <span>On-demand model inference</span>
         </div>
       </aside>
 
       <main className="main-area" id="main">
         <header className="topbar">
           <div className="breadcrumbs"><span>Workspace</span><b>/</b><strong>Text analyzer</strong></div>
-          <div className="api-indicator"><span /> Inference API</div>
+          <div className="api-indicator">API-powered analysis</div>
         </header>
 
         <div className="content-wrap" id="analyzer">
+          <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</p>
           <section className="page-intro">
             <div className="intro-copy">
               <div className="eyebrow"><span className="eyebrow-mark" /> FEEDBACK INTELLIGENCE</div>
@@ -182,11 +198,10 @@ function App() {
                 </div>
               </fieldset>
 
-              <div className="mode-switch" role="tablist" aria-label="Analysis mode">
+              <div className="mode-switch" role="group" aria-label="Analysis mode">
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={mode === 'single'}
+                  aria-pressed={mode === 'single'}
                   className={mode === 'single' ? 'selected' : ''}
                   disabled={loading}
                   onClick={() => {
@@ -198,8 +213,7 @@ function App() {
                 </button>
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={mode === 'batch'}
+                  aria-pressed={mode === 'batch'}
                   className={mode === 'batch' ? 'selected' : ''}
                   disabled={loading}
                   onClick={() => {
@@ -223,12 +237,13 @@ function App() {
                     }}
                     maxLength={MAX_TEXT_LENGTH}
                     disabled={loading}
+                    aria-describedby="single-review-help single-review-count"
                     placeholder="Paste a product review or campus comment to uncover its sentiment…"
                     rows={9}
                   />
                   <span className="textarea-footer">
-                    <span>Be as detailed as you like</span>
-                    <span>{singleText.length.toLocaleString()} / {MAX_TEXT_LENGTH.toLocaleString()}</span>
+                    <span id="single-review-help">Be as detailed as you like</span>
+                    <span id="single-review-count">{singleText.length.toLocaleString()} / {MAX_TEXT_LENGTH.toLocaleString()} characters</span>
                   </span>
                 </label>
               ) : (
@@ -242,12 +257,13 @@ function App() {
                       resetResults()
                     }}
                     disabled={loading}
+                    aria-describedby="batch-review-help batch-review-count"
                     placeholder={'The quality feels premium and the battery lasts all day.\nThe delivery was late and the packaging arrived damaged.'}
                     rows={9}
                   />
                   <span className="textarea-footer">
-                    <span>Up to {MAX_BATCH_SIZE} reviews · {MAX_TEXT_LENGTH.toLocaleString()} characters each</span>
-                    <span>{batchReviews.length} reviews</span>
+                    <span id="batch-review-help">One review per line · up to {MAX_BATCH_SIZE} reviews · {MAX_TEXT_LENGTH.toLocaleString()} characters each</span>
+                    <span id="batch-review-count">{batchReviews.length} reviews</span>
                   </span>
                 </label>
               )}
@@ -264,13 +280,13 @@ function App() {
               </div>
             </form>
 
-            <section className={`card results-card ${loading ? 'is-loading' : ''}`} aria-live="polite">
+            <section className={`card results-card ${loading ? 'is-loading' : ''}`} aria-busy={loading} aria-labelledby="results-title">
               <div className="card-heading results-heading">
                 <div>
                   <span className="step-label">02 <i /> INSIGHT</span>
-                  <h2>Analysis results</h2>
+                  <h2 id="results-title">Analysis results</h2>
                 </div>
-                {singleResult || batchResults ? <span className="live-badge"><span /> LIVE RESULT</span> : null}
+                {singleResult || batchResults ? <span className="live-badge"><span /> ANALYSIS COMPLETE</span> : null}
               </div>
 
               {loading ? (
@@ -287,7 +303,7 @@ function App() {
 
           <footer className="page-footer">
             <span>SentimentIQ <b>·</b> Model-powered feedback analysis</span>
-            <span>Scores are raw model outputs, not calibrated probabilities.</span>
+            <span>Raw confidence scores are uncalibrated and are not probabilities.</span>
           </footer>
         </div>
       </main>
@@ -320,7 +336,10 @@ function DomainOption({
 function SingleResult({ result, review }: { result: AnalysisResult; review: string }) {
   return (
     <div className="result-content">
-      <div className="analyzed-quote"><span>ANALYZED REVIEW</span><p>“{review}”</p></div>
+      <div className="analyzed-quote">
+        <span>ANALYZED REVIEW <i>·</i> ASPECT MENTIONS HIGHLIGHTED</span>
+        <p>{renderReview(review, result.aspects)}</p>
+      </div>
       <SentimentPanel sentiment={result.overall} />
       <AspectList aspects={result.aspects} />
     </div>
@@ -331,16 +350,27 @@ function BatchResults({ outcomes, reviews }: { outcomes: BatchOutcome[]; reviews
   if (!outcomes.length) {
     return <div className="empty-state compact-empty"><span className="empty-icon"><NavGlyph /></span><h3>No results returned</h3><p>The API returned an empty batch response.</p></div>
   }
+  const succeeded = outcomes.filter((outcome) => outcome.status === 'succeeded').length
+  const failed = outcomes.length - succeeded
+  const hasAspectResults = outcomes.some(
+    (outcome) => outcome.status === 'succeeded' && (outcome.result?.aspects.length ?? 0) > 0,
+  )
+
   return (
     <div className="batch-list">
-      <div className="batch-summary"><span>{outcomes.length} reviews processed</span><small>Results remain in input order</small></div>
+      <div className="batch-summary">
+        <p className="batch-counts">{succeeded} succeeded, {failed} failed</p>
+        <small>Results remain in input order</small>
+      </div>
+      {hasAspectResults && <AspectDisclaimer />}
       {outcomes.map((outcome) => (
         <article className="batch-item" key={outcome.input_index}>
-          <div className="batch-item-head">
-            <span className="batch-index">{String(outcome.input_index + 1).padStart(2, '0')}</span>
-            <p>{reviews[outcome.input_index] ?? `Review ${outcome.input_index + 1}`}</p>
-            <span className={`status-pill ${outcome.status}`}>{outcome.status === 'succeeded' ? 'Complete' : 'Failed'}</span>
-          </div>
+          <BatchReviewText
+            index={outcome.input_index}
+            status={outcome.status}
+            review={reviews[outcome.input_index] ?? `Review ${outcome.input_index + 1}`}
+            aspects={outcome.result?.aspects ?? []}
+          />
           {outcome.status === 'succeeded' && outcome.result ? (
             <>
               <SentimentPanel sentiment={outcome.result.overall} compact />
@@ -356,27 +386,31 @@ function BatchResults({ outcomes, reviews }: { outcomes: BatchOutcome[]; reviews
 }
 
 function SentimentPanel({ sentiment, compact = false }: { sentiment: SentimentValue; compact?: boolean }) {
+  const rawConfidence = sentiment.confidence_kind === 'raw_score'
+
   return (
     <div className={`sentiment-panel ${compact ? 'compact' : ''}`}>
       <div className="sentiment-overview">
         <span className="result-label">OVERALL SENTIMENT</span>
         <div className="sentiment-line">
-          <SentimentBadge label={sentiment.sentiment_label} />
+          <SentimentBadge label={sentiment.sentiment_label} prominent={!compact} />
           <span className="score-value">{formatScore(sentiment.sentiment_score)}</span>
         </div>
-        <span className="score-caption">Raw sentiment score <i>·</i> range −1 to +1</span>
+        <span className="score-caption">Sentiment score is polarity from -1 (most negative) to +1 (most positive).</span>
       </div>
       <div className="confidence-box">
-        <span className="result-label">CONFIDENCE VALUE</span>
+        <span className="result-label">{rawConfidence ? 'UNCALIBRATED CONFIDENCE' : 'CALIBRATED CONFIDENCE'}</span>
         <b>{sentiment.confidence_value.toFixed(3)}</b>
-        <span className="confidence-kind">{sentiment.confidence_kind.replace('_', ' ')}</span>
+        <span className="confidence-kind">
+          {rawConfidence ? 'Raw model score (uncalibrated), not a probability.' : 'Calibrated probability'}
+        </span>
       </div>
     </div>
   )
 }
 
-function SentimentBadge({ label }: { label: SentimentLabel }) {
-  return <span className={`sentiment-badge ${label}`}><i />{capitalize(label)}</span>
+function SentimentBadge({ label, prominent = false }: { label: SentimentLabel; prominent?: boolean }) {
+  return <span className={`sentiment-badge ${label} ${prominent ? 'prominent' : ''}`}><i />{capitalize(label)}</span>
 }
 
 function AspectList({ aspects, compact = false }: { aspects: AspectResult[]; compact?: boolean }) {
@@ -386,6 +420,7 @@ function AspectList({ aspects, compact = false }: { aspects: AspectResult[]; com
         <div><span className="result-label">ASPECT BREAKDOWN</span><h3>What stood out</h3></div>
         <span className="aspect-count">{aspects.length} {aspects.length === 1 ? 'aspect' : 'aspects'}</span>
       </div>
+      {!compact && <AspectDisclaimer />}
       {aspects.length ? (
         <div className="aspect-list">
           {aspects.map((aspect, index) => (
@@ -399,6 +434,14 @@ function AspectList({ aspects, compact = false }: { aspects: AspectResult[]; com
   )
 }
 
+function AspectDisclaimer() {
+  return (
+    <p className="aspect-disclaimer">
+      Aspect detection is vocabulary-based, and sentiment is assigned from surrounding text. Treat these as baseline signals.
+    </p>
+  )
+}
+
 function AspectRow({ aspect }: { aspect: AspectResult }) {
   return (
     <div className="aspect-row">
@@ -407,6 +450,54 @@ function AspectRow({ aspect }: { aspect: AspectResult }) {
       <SentimentBadge label={aspect.sentiment_label} />
       <span className="aspect-score" title="Raw sentiment score">{formatScore(aspect.sentiment_score)}</span>
     </div>
+  )
+}
+
+function renderReview(review: string, aspects: AspectResult[]) {
+  return buildReviewSegments(review, aspects).map((segment, index) => (
+    segment.highlighted
+      ? <mark key={`highlight-${index}`}>{segment.text}</mark>
+      : <Fragment key={`text-${index}`}>{segment.text}</Fragment>
+  ))
+}
+
+function BatchReviewText({
+  index,
+  status,
+  review,
+  aspects,
+}: {
+  index: number
+  status: BatchOutcome['status']
+  review: string
+  aspects: AspectResult[]
+}) {
+  const reviewNumber = index + 1
+  const statusLabel = status === 'succeeded' ? 'Succeeded' : 'Failed'
+  const reviewContent = renderReview(review, aspects)
+
+  if (review.length <= BATCH_REVIEW_DETAILS_THRESHOLD) {
+    return (
+      <div className="batch-review-short">
+        <span className="batch-index" aria-hidden="true">{String(reviewNumber).padStart(2, '0')}</span>
+        <p><strong>Review {reviewNumber}:</strong> {reviewContent}</p>
+        <span className={`status-pill ${status}`}>{statusLabel}</span>
+      </div>
+    )
+  }
+
+  return (
+    <details className="batch-review">
+      <summary aria-label={`Review ${reviewNumber}, ${statusLabel}. Expand to read the full review.`}>
+        <span className="batch-index" aria-hidden="true">{String(reviewNumber).padStart(2, '0')}</span>
+        <span className="batch-review-summary">
+          <strong>Review {reviewNumber}</strong>
+          <span className="batch-review-preview">{reviewContent}</span>
+        </span>
+        <span className={`status-pill ${status}`}>{statusLabel}</span>
+      </summary>
+      <p className="batch-review-full">{reviewContent}</p>
+    </details>
   )
 }
 
@@ -424,7 +515,7 @@ function EmptyState({ mode }: { mode: Mode }) {
 
 function LoadingState({ mode }: { mode: Mode }) {
   return (
-    <div className="loading-state" role="status">
+    <div className="loading-state">
       <Spinner />
       <h3>{mode === 'single' ? 'Reading between the lines' : 'Analyzing your batch'}</h3>
       <p>Sending feedback to the selected sentiment model…</p>
